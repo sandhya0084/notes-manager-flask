@@ -1,4 +1,5 @@
 from flask import Flask, render_template,redirect, url_for, request, session, flash, send_file
+from werkzeug.utils import secure_filename
 from database import (init_db, register_user,store_otp,
                       db_verify_otp,check_user_exists, login_user, db_reset_password,
                       db_add_note, get_user_notes, get_note,
@@ -244,18 +245,27 @@ def upload_file():
     message_type = ''       
     if request.method == 'POST':
         file = request.files.get('file')
-        filename = file.filename
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        if not file or not file.filename:
-            message = "All fields are required"
-            message_type = 'error'
-        elif check_file_exists(session['user_id'], filename):
-            message = "File already exists"
+        if not file or file.filename == '':
+            message = "No file selected"
             message_type = 'error'
         else:
-            file.save(filepath)
-            db_upload_file(session['user_id'], filename, filepath)
-            return redirect(url_for('view_files'))
+            filename = secure_filename(file.filename)
+            if check_file_exists(session['user_id'], filename):
+                message = "File already exists"
+                message_type = 'error'
+            else:
+                # ensure upload folder exists
+                os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                try:
+                    file.save(filepath)
+                    db_upload_file(session['user_id'], filename, filepath)
+                    flash('File uploaded successfully', 'success')
+                    return redirect(url_for('view_files'))
+                except Exception as e:
+                    message = 'Failed to save file'
+                    message_type = 'error'
+                    print(f"[upload_file] save error: {e}")
     return render_template('upload_file.html', message = message, message_type = message_type)
 
 
@@ -271,6 +281,12 @@ def view_file(fid):
     if not 'user_id'in session:
         return redirect(url_for('login'))
     file = get_file(fid)
+    if not file:
+        flash('File not found', 'error')
+        return redirect(url_for('view_files'))
+    if not os.path.exists(file):
+        flash('File missing on server', 'error')
+        return redirect(url_for('view_files'))
     return send_file(file, as_attachment = False)
 
 @app.route('/delete_file/<fid>')
@@ -278,8 +294,16 @@ def delete_file(fid):
     if not 'user_id' in session:
         return redirect(url_for('login'))
     file = get_file(fid)
+    # remove DB record first
     db_delete_file(fid, session['user_id'])
-    os.remove(file)
+    # then remove file if it exists
+    if file and os.path.exists(file):
+        try:
+            os.remove(file)
+        except Exception:
+            flash('Failed to remove file from disk', 'error')
+    else:
+        flash('File not found on server', 'error')
     return redirect(url_for('view_files'))
 
 @app.route('/download_file/<fid>')
@@ -287,6 +311,9 @@ def download_file(fid):
     if not 'user_id'in session:
         return redirect(url_for('login'))
     file = get_file(fid)
+    if not file or not os.path.exists(file):
+        flash('File not available for download', 'error')
+        return redirect(url_for('view_files'))
     return send_file(file, as_attachment = True)
 
 
