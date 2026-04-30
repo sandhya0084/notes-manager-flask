@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Upload File{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='upload_file.css') }}">
+{% endblock %}
+
+{% block content %}
+    <div class="upload-file-container">
+        <h2>Upload File</h2>
+        {% if message %}
+            <div class="message {{ message_type }}">{{ message }}</div>
+        {% endif %}
+        <form method="POST" action="{{ url_for('upload_file') }}" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="file">Choose File</label>
+                <input type="file" id="file" name="file" required>
+            </div>
+            <button type="submit">Upload</button>
+        </form>
+    </div>
+{% endblock %}

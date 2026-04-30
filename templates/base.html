@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{% endblock %} - Notes Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='base.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <header class="header">
+        <h1 class="site-title">Notes Manager</h1>
+    </header>
+    <nav class="navbar">
+        <div class="nav-brand">Notes Manager</div>
+        <ul class="nav-links">
+            {% if session.user_id %}
+                <li><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+                <li><a href="{{ url_for('add_note') }}">Add Note</a></li>
+                <li><a href="{{ url_for('view_notes') }}">View Notes</a></li>
+                <li><a href="{{ url_for('upload_file') }}">Upload File</a></li>
+                <li><a href="{{ url_for('view_files') }}">View Files</a></li>
+                <li><a href="{{ url_for('search') }}">Search</a></li>
+                <li><a href="{{ url_for('export_notes') }}">Export Notes</a></li>
+                <li><a href="{{ url_for('logout') }}">Logout</a></li>
+            {% else %}
+                <li><a href="{{ url_for('register') }}">Register</a></li>
+                <li><a href="{{ url_for('login') }}">Login</a></li>
+            {% endif %}
+        </ul>
+    </nav>
+    <main class="main-content">
+        {% block content %}
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="message {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        {% endblock %}
+    </main>
+    <footer class="footer">
+        <p>© 2025 Notes Manager. All rights reserved.</p>
+    </footer>
+</body>
+</html> 
+

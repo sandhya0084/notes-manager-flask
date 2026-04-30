@@ -1,0 +1,37 @@
+.view-note-container {
+    background-color: #fff;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 600px;
+}
+
+.view-note-container h2 {
+    color: #333;
+    margin-bottom: 1rem;
+}
+
+.view-note-container p {
+    color: #666;
+    font-size: 1rem;
+}
+
+.view-note-container a {
+    color: #2b5685;
+    text-decoration: none;
+}
+
+.view-note-container a:hover {
+    text-decoration: underline;
+}
+
+.success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.error {
+    background-color: #f8d7da;
+    color: #721c24;
+}

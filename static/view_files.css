@@ -1,0 +1,49 @@
+.view-files-container {
+    background-color: #fff;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 600px;
+}
+
+.view-files-container h2 {
+    text-align: center;
+    color: #333;
+    margin-bottom: 1.5rem;
+}
+
+.files-list {
+    list-style: none;
+    padding: 0;
+}
+
+.files-list li {
+    border-bottom: 1px solid #ccc;
+    padding: 1rem 0;
+}
+
+.files-list li p {
+    color: #666;
+    margin: 0.5rem 0;
+}
+
+.files-list li a {
+    color: #2b5685;
+    text-decoration: none;
+    margin-right: 1rem;
+}
+
+.files-list li a:hover {
+    text-decoration: underline;
+}
+
+.success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.error {
+    background-color: #f8d7da;
+    color: #721c24;
+}

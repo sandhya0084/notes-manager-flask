@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='home.css') }}">
+{% endblock %}
+
+{% block content %}
+    <div class="home-container">
+        <h2>Welcome to Notes Manager</h2>
+        <p>Organize your notes and files with ease. Sign up or log in to get started!</p>
+        <div class="home-buttons">
+            <a href="{{ url_for('register') }}" class="btn">Register</a>
+            <a href="{{ url_for('login') }}" class="btn">Login</a>
+        </div>
+    </div>
+{% endblock %}

@@ -1,0 +1,111 @@
+/* body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+} */
+/* BODY */
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #2b5685, #4facfe);
+    margin: 0;
+}
+
+/* MAIN CONTENT */
+.main-content {
+    min-height: calc(100vh - 120px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.main-content {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.header {
+    background-color: #030910;
+    color: #fff;
+    text-align: center;
+    padding: 1rem;
+}
+
+.site-title {
+    margin: 0;
+    font-size: 1.8rem;
+}
+
+.navbar {
+    /* background-color: #2b5685; */
+    background-image: linear-gradient(to right, rgb(122, 180, 201), rgb(28, 57, 68));
+    padding: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-brand {
+    color: #fff;
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+.nav-links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+}
+
+.nav-links li {
+    margin-left: 1.5rem;
+}
+
+.nav-links a {
+    color: #fff;
+    text-decoration: none;
+    font-size: 1rem;
+}
+
+.nav-links a:hover {
+    text-decoration: underline;
+}
+
+.main-content {
+    padding: 2rem;
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.footer {
+    /* background-color: #030910; */
+    background-image: linear-gradient(to right, rgb(122, 180, 201), rgb(28, 57, 68));
+    color: #fff;
+    text-align: center;
+    padding: 1rem;
+    font-size: 0.9rem;
+}
+
+.message {
+    padding: 0.5rem;
+    text-align: center;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.error {
+    background-color: #f8d7da;
+    color: #721c24;
+}

@@ -1,0 +1,113 @@
+/* div{
+    margin: 15px;
+    font-size: larger;
+}
+
+.success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.error {
+    background-color: #f8d7da;
+    color: #721c24;
+} */
+
+/* Container (card layout) */
+.register-container {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+}
+
+/* Title */
+.register-container h2 {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    color: #2b5685;
+}
+
+/* Form group */
+.form-group {
+    margin-bottom: 1rem;
+}
+
+/* Labels */
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    color: #333;
+    font-weight: 500;
+}
+
+/* Inputs */
+.form-group input {
+    width: 100%;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 0.95rem;
+}
+
+/* Focus effect */
+.form-group input:focus {
+    outline: none;
+    border-color: #4facfe;
+    box-shadow: 0 0 5px rgba(79, 172, 254, 0.3);
+}
+
+/* Button */
+.register-container button {
+    width: 100%;
+    padding: 10px;
+    background: linear-gradient(135deg, #2b5685, #4facfe);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: 0.3s;
+}
+
+/* Button hover */
+.register-container button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+/* Bottom text */
+.register-container p {
+    text-align: center;
+    margin-top: 1rem;
+}
+
+/* Links */
+.register-container a {
+    color: #2b5685;
+    text-decoration: none;
+}
+
+.register-container a:hover {
+    text-decoration: underline;
+}
+
+/* Messages */
+.message {
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+.success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.error {
+    background-color: #f8d7da;
+    color: #721c24;
+}
