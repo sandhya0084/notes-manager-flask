@@ -576,7 +576,13 @@ def add_note():
 def view_notes():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    return render_template('view_notes.html', notes=get_user_notes(session['user_id']))
+
+    try:
+        files = get_user_files(session['user_id']) or []
+        return render_template('view_notes.html', files=files)
+    except Exception as e:
+        print("ERROR in view_notes:", e)
+        return "Internal Server Error", 500
 
 @app.route('/delete_note/<nid>')
 def delete_note(nid):
