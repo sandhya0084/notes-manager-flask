@@ -4,21 +4,24 @@ from pymysql.cursors import DictCursor
 
 # Environment-based configuration
 # Supports local development and production (e.g. PythonAnywhere).
-ENV = os.environ.get("ENV", "development")
-DB_HOST = os.environ.get("DB_HOST")
-DB_USER = os.environ.get("DB_USER")
-DB_PASSWORD = os.environ.get("DB_PASSWORD")
-DB_NAME = os.environ.get("DB_NAME")
+import os
+
+ENV = os.environ.get("ENV")
 
 if ENV == "production":
-    # sensible production defaults; encourage setting env vars for secrets
-    DB_HOST = DB_HOST or "sandhyachirumamilla.mysql.pythonanywhere-services.com"
-    DB_USER = DB_USER or "sandhyachirumamilla"
-    DB_NAME = DB_NAME or "sandhyachirumamilla$notes_db"
+    db_config = {
+        "host": "sandhyachirumamilla.mysql.pythonanywhere-services.com",
+        "user": "sandhyachirumamilla",
+        "password": os.environ.get("Sandhya@123"),
+        "database": "sandhyachirumamilla$notes_db"
+    }
 else:
-    DB_HOST = DB_HOST or "localhost"
-    DB_USER = DB_USER or "root"
-    DB_NAME = DB_NAME or "notes_db"
+    db_config = {
+        "host": "localhost",
+        "user": "root",
+        "password": "root",
+        "database": "notes_db"
+    }
 
 
 def get_db_connection():
@@ -26,10 +29,24 @@ def get_db_connection():
 
     Caller is responsible for closing the connection. Use try/finally.
     """
-    conn = pymysql.connect(host=DB_HOST,
-                           user=DB_USER,
-                           password=DB_PASSWORD or "root",
-                           database=DB_NAME,
+    # Resolve DB configuration at call-time from environment with sensible
+    # fallbacks. This avoids NameError during autoreload if module-level
+    # variables are not yet (re)bound.
+    if ENV == "production":
+        host = os.environ.get("DB_HOST") or "sandhyachirumamilla.mysql.pythonanywhere-services.com"
+        user = os.environ.get("DB_USER") or "sandhyachirumamilla"
+        dbname = os.environ.get("DB_NAME") or "sandhyachirumamilla$notes_db"
+    else:
+        host = os.environ.get("DB_HOST") or "localhost"
+        user = os.environ.get("DB_USER") or "root"
+        dbname = os.environ.get("DB_NAME") or "notes_db"
+
+    password = os.environ.get("Sandhya@123") or "root"
+
+    conn = pymysql.connect(host=host,
+                           user=user,
+                           password=password,
+                           database=dbname,
                            cursorclass=DictCursor,
                            charset="utf8mb4",
                            autocommit=False)
