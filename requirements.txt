@@ -7,3 +7,4 @@ blinker==1.9.0
 PyMySQL==1.1.0
 openpyxl==3.1.2
 cryptography
+gunicorn
