@@ -717,6 +717,20 @@ def db_delete_file(fid, user_id):
     conn.close()
     return True, "File deleted"
 
+def check_file_exists(user_id, filename):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT id FROM File_Upload WHERE user_id=? AND filename=?",
+        (user_id, filename)
+    )
+
+    file = cursor.fetchone()
+    conn.close()
+
+    return bool(file)
+
 
 # ---------------- SEARCH ---------------- #
 
