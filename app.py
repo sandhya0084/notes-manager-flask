@@ -21,8 +21,7 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok = True)
 
 serializer = URLSafeTimedSerializer(app.secret_key)
-
-# init_db()
+init_db()
 
 
 #EMAIL CONFIGURATION
@@ -365,13 +364,15 @@ def logout():
         
         return redirect(url_for('login'))
 
+# if __name__ == "__main__":
+#     # Run DB only in local
+#     if os.environ.get("ENV") != "production":
+#         init_db()
+
+#     port = int(os.environ.get("PORT", 5000))
+#     app.run(host="0.0.0.0", port=port)
+
 if __name__ == "__main__":
-    # Run DB only in local
-    if os.environ.get("ENV") != "production":
-        init_db()
-
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-
-
+    app.run(host="0.0.0.0", port=port)  # run always once
 
