@@ -22,7 +22,8 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok = True)
 
 serializer = URLSafeTimedSerializer(app.secret_key)
 
-init_db()
+# init_db()
+
 
 #EMAIL CONFIGURATION
 EMAIL_ADDRESS = "pythonexample704@gmail.com"
@@ -364,8 +365,9 @@ def logout():
         
         return redirect(url_for('login'))
 
-
-app.run(debug = "True", port = 5008)
+if __name__ == "__main__":
+    init_db()
+    app.run(debug = "True", port = 5008)
 
 
 
