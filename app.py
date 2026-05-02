@@ -37,6 +37,7 @@ EMAIL_SMTP_PORT = int(os.environ.get('EMAIL_SMTP_PORT', '465'))
 EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', '1') in ('1', 'true', 'True')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '0') in ('1', 'true', 'True')
 ENABLE_EMAIL_TEST = os.environ.get('ENABLE_EMAIL_TEST', '0') in ('1', 'true', 'True')
+SHOW_OTP_ON_FAILURE = os.environ.get('SHOW_OTP_ON_FAILURE', '0') in ('1', 'true', 'True')
 
 
 def send_email(to_mail, subject, body):
@@ -131,8 +132,15 @@ def register():
                 store_otp(mail, otp)
                 subject = "OTP for Notes manager"
                 body = f"Your OTP for Notes manager is {otp}"
-                send_email(mail, subject, body)
-                
+                sent = send_email(mail, subject, body)
+                if not sent:
+                    flash('Failed to send OTP email. If you do not receive email, contact admin.', 'error')
+                    # optional dev fallback: show OTP on verify page when SMTP not available
+                    if SHOW_OTP_ON_FAILURE:
+                        session['pending_otp'] = otp
+                else:
+                    flash('OTP sent to your email', 'success')
+
                 return redirect(url_for('verify_otp', email = mail))
                     
                                     
@@ -145,6 +153,10 @@ def verify_otp(email):
     print(email)
     message = ''
     message_type = ''
+    # if OTP was stored in session because email sending failed, expose it to template
+    otp_to_show = None
+    if session.get('pending_otp'):
+        otp_to_show = session.get('pending_otp')
     if request.method == 'POST':
         otp = request.form.get('otp')
         
@@ -157,7 +169,11 @@ def verify_otp(email):
             message = "Invalid OTP"
             message_type = 'error'
             
-    return render_template('verify_otp.html',email = email, message = message, message_type= message_type)
+    # clear displayed otp after rendering once
+    resp = render_template('verify_otp.html', email=email, message=message, message_type=message_type, otp_to_show=otp_to_show)
+    if 'pending_otp' in session:
+        session.pop('pending_otp', None)
+    return resp
     
        
 @app.route('/login', methods = ['POST', 'GET'])

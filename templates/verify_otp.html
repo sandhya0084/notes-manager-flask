@@ -12,6 +12,9 @@
         {% if message %}
             <div class="message {{ message_type }}">{{ message }}</div>
         {% endif %}
+        {% if otp_to_show %}
+            <div class="message warning">Your OTP (displayed because email failed): <strong>{{ otp_to_show }}</strong></div>
+        {% endif %}
         <form method="POST" action="{{ url_for('verify_otp', email=email) }}">
             <div class="form-group">
                 <label for="otp">Enter OTP</label>
