@@ -1,4 +1,4 @@
-from flask import Flask, render_template,redirect, url_for, request, session, flash, send_file
+from flask import Flask, render_template,redirect, url_for, request, session, flash, send_file, jsonify
 from werkzeug.utils import secure_filename
 from database import (init_db, register_user,store_otp,
                       db_verify_otp,check_user_exists, login_user, db_reset_password,
@@ -32,27 +32,66 @@ with app.app_context():
 # EMAIL CONFIGURATION (from env; optional)
 EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
+EMAIL_SMTP_HOST = os.environ.get('EMAIL_SMTP_HOST', 'smtp.gmail.com')
+EMAIL_SMTP_PORT = int(os.environ.get('EMAIL_SMTP_PORT', '465'))
+EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', '1') in ('1', 'true', 'True')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '0') in ('1', 'true', 'True')
+ENABLE_EMAIL_TEST = os.environ.get('ENABLE_EMAIL_TEST', '0') in ('1', 'true', 'True')
 
 
 def send_email(to_mail, subject, body):
-    # Non-fatal: log and continue on failure
+    """Send an email using configured SMTP settings.
+
+    Returns True on success, False on failure. Non-fatal.
+    """
     if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
         print("Email not configured; skipping send")
         return False
-    try:
-        msg = EmailMessage()
-        msg['To'] = to_mail
-        msg['Subject'] = subject
-        msg['From'] = EMAIL_ADDRESS
-        msg.set_content(body)
 
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10) as smtp:
-            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-            smtp.send_message(msg)
+    msg = EmailMessage()
+    msg['To'] = to_mail
+    msg['Subject'] = subject
+    msg['From'] = EMAIL_ADDRESS
+    msg.set_content(body)
+
+    try:
+        if EMAIL_USE_SSL:
+            with smtplib.SMTP_SSL(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=10) as smtp:
+                smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, timeout=10) as smtp:
+                smtp.ehlo()
+                if EMAIL_USE_TLS:
+                    smtp.starttls()
+                    smtp.ehlo()
+                smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+                smtp.send_message(msg)
         return True
     except Exception as e:
         print('send_email error:', e)
         return False
+
+
+@app.route('/email_test', methods=['GET', 'POST'])
+def email_test():
+    """Send a test email. Only enabled when ENABLE_EMAIL_TEST is truthy.
+
+    GET: returns usage. POST: accepts form param `to` or uses `EMAIL_ADDRESS`.
+    """
+    if not ENABLE_EMAIL_TEST:
+        return jsonify({'ok': False, 'error': 'email test disabled'}), 403
+
+    to = request.values.get('to') or EMAIL_ADDRESS
+    if not to:
+        return jsonify({'ok': False, 'error': 'no recipient configured'}), 400
+
+    subject = 'Test email from Notes Manager'
+    body = 'This is a test email. If you received it, SMTP is configured.'
+    ok = send_email(to, subject, body)
+    if ok:
+        return jsonify({'ok': True, 'to': to})
+    return jsonify({'ok': False, 'error': 'send failed'})
 
 @app.route('/')
 def home():    
