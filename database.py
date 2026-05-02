@@ -509,6 +509,15 @@ def init_db():
         )
         """
         )
+        # Ensure is_active column exists (0 = not verified, 1 = verified)
+        cursor.execute("PRAGMA table_info(User)")
+        cols = [r[1] for r in cursor.fetchall()]
+        if 'is_active' not in cols:
+            try:
+                cursor.execute("ALTER TABLE User ADD COLUMN is_active INTEGER DEFAULT 0")
+            except Exception:
+                # older SQLite versions may not support ALTER ADD with DEFAULT; ignore if fails
+                pass
 
         # OTP table (separate table to simplify expiry/rotation)
         cursor.execute(
@@ -561,10 +570,19 @@ def register_user(username, email, password):
         with closing(get_db_connection()) as conn:
             cursor = conn.cursor()
             hashed = generate_password_hash(password)
-            cursor.execute(
-                "INSERT INTO User (username, email, password) VALUES (?, ?, ?)",
-                (username, email, hashed)
-            )
+            # ensure is_active column exists before inserting active flag
+            cursor.execute("PRAGMA table_info(User)")
+            cols = [r[1] for r in cursor.fetchall()]
+            if 'is_active' in cols:
+                cursor.execute(
+                    "INSERT INTO User (username, email, password, is_active) VALUES (?, ?, ?, 0)",
+                    (username, email, hashed)
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO User (username, email, password) VALUES (?, ?, ?)",
+                    (username, email, hashed)
+                )
             conn.commit()
             return True, "Registration successful!"
     except sqlite3.IntegrityError:
@@ -622,7 +640,13 @@ def db_verify_otp(user_otp, email):
             cursor.execute("SELECT id FROM OTP WHERE user_id=? AND otp=?", (user_id, user_otp))
             row = cursor.fetchone()
             if row:
+                # delete otp rows and activate user
                 cursor.execute("DELETE FROM OTP WHERE user_id=?", (user_id,))
+                # set user active
+                cursor.execute("PRAGMA table_info(User)")
+                cols = [r[1] for r in cursor.fetchall()]
+                if 'is_active' in cols:
+                    cursor.execute("UPDATE User SET is_active=1 WHERE id=?", (user_id,))
                 conn.commit()
                 return True
             return False
@@ -641,6 +665,13 @@ def login_user(username_or_email, password):
             )
             user = cursor.fetchone()
             if user and check_password_hash(user["password"], password):
+                # require account verification
+                try:
+                    is_active = user.get('is_active') if isinstance(user, dict) else user['is_active']
+                except Exception:
+                    is_active = None
+                if is_active in (0, '0', None):
+                    return False, "Account not verified. Please check your email.", None
                 return True, "Login successful", user["id"]
             return False, "Invalid credentials", None
     except Exception as e:
