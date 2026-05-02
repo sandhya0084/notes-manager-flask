@@ -214,8 +214,11 @@ def forgot_password():
             token = serializer.dumps(email, salt = 'reset-password')
             reset_url = url_for('reset_password', token = token, _external = True)
             body = f"Click this link to reset your password: {reset_url}"
-            send_email(email, "Reset Link", body)
-            flash("Reset link has been sent to registered email", 'success')
+            sent = send_email(email, "Reset Link", body)
+            if sent:
+                flash("Reset link has been sent to registered email", 'success')
+            else:
+                flash("Failed to send reset link. Please contact admin.", 'error')
                            
     return render_template('forgot_password.html')
     
