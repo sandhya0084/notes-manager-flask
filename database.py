@@ -475,83 +475,130 @@
 #             conn.close()
 import sqlite3
 import os
+from contextlib import closing
+from werkzeug.security import generate_password_hash, check_password_hash
 
-DB_PATH = "notes.db"
+DB_PATH = os.path.join(os.path.dirname(__file__), "notes.db")
 
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    # Use check_same_thread=False for WSGI servers with multiple threads/workers.
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # enable foreign keys
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
 def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    with closing(get_db_connection()) as conn:
+        cursor = conn.cursor()
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS User (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        otp TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+        # Users table
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS User (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+        )
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS Notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        title TEXT,
-        content TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+        # OTP table (separate table to simplify expiry/rotation)
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS OTP (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            otp TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE
+        )
+        """
+        )
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS File_Upload (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        filename TEXT,
-        filepath TEXT,
-        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+        # Notes table
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS Notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE
+        )
+        """
+        )
 
-    conn.commit()
-    conn.close()
+        # Files table
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS File_Upload (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            filename TEXT NOT NULL,
+            filepath TEXT NOT NULL,
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE
+        )
+        """
+        )
+
+        conn.commit()
 
 
 # ---------------- USER ---------------- #
 
 def register_user(username, email, password):
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO User (username, email, password) VALUES (?, ?, ?)",
-            (username, email, password)
-        )
-        conn.commit()
-        return True, "Registration successful!"
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            hashed = generate_password_hash(password)
+            cursor.execute(
+                "INSERT INTO User (username, email, password) VALUES (?, ?, ?)",
+                (username, email, hashed)
+            )
+            conn.commit()
+            return True, "Registration successful!"
     except sqlite3.IntegrityError:
         return False, "Email already exists"
     except Exception as e:
         print("Register Error:", e)
         return False, "Registration failed"
-    finally:
-        conn.close()
+
+
+def _get_user_id_by_email(email):
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM User WHERE email=?", (email,))
+            row = cursor.fetchone()
+            return row["id"] if row else None
+    except Exception:
+        return None
 
 
 def store_otp(email, otp):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE User SET otp=? WHERE email=?", (otp, email))
-    conn.commit()
-    conn.close()
-    return True
+    """Store OTP in OTP table for user identified by email."""
+    user_id = _get_user_id_by_email(email)
+    if not user_id:
+        return False
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            # remove existing otps for user
+            cursor.execute("DELETE FROM OTP WHERE user_id=?", (user_id,))
+            cursor.execute("INSERT INTO OTP (user_id, otp) VALUES (?, ?)", (user_id, otp))
+            conn.commit()
+            return True
+    except Exception as e:
+        print("store_otp error:", e)
+        return False
 
 
 def check_user_exists(email):
@@ -564,183 +611,212 @@ def check_user_exists(email):
 
 
 def db_verify_otp(user_otp, email):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM User WHERE otp=? AND email=?", (user_otp, email))
-    user = cursor.fetchone()
-
-    if user:
-        cursor.execute("UPDATE User SET otp=NULL WHERE email=?", (email,))
-        conn.commit()
-        conn.close()
-        return True
-
-    conn.close()
-    return False
+    user_id = _get_user_id_by_email(email)
+    if not user_id:
+        return False
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM OTP WHERE user_id=? AND otp=?", (user_id, user_otp))
+            row = cursor.fetchone()
+            if row:
+                cursor.execute("DELETE FROM OTP WHERE user_id=?", (user_id,))
+                conn.commit()
+                return True
+            return False
+    except Exception as e:
+        print("db_verify_otp error:", e)
+        return False
 
 
 def login_user(username_or_email, password):
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT * FROM User WHERE (username=? OR email=?) AND password=?",
-            (username_or_email, username_or_email, password)
-        )
-
-        user = cursor.fetchone()
-
-        if user:
-            return True, "Login successful", user["id"]
-
-        return False, "Invalid credentials", None
-
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM User WHERE username=? OR email=?",
+                (username_or_email, username_or_email)
+            )
+            user = cursor.fetchone()
+            if user and check_password_hash(user["password"], password):
+                return True, "Login successful", user["id"]
+            return False, "Invalid credentials", None
     except Exception as e:
         print("Login Error:", e)
         return False, "Login failed due to server error", None
-    finally:
-        conn.close()
 
 
 def db_reset_password(email, password):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE User SET password=? WHERE email=?", (password, email))
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        hashed = generate_password_hash(password)
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE User SET password=? WHERE email=?", (hashed, email))
+            conn.commit()
+            return True
+    except Exception as e:
+        print("db_reset_password error:", e)
+        return False
 
 
 # ---------------- NOTES ---------------- #
 
 def db_add_note(user_id, title, content):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO Notes (user_id, title, content) VALUES (?, ?, ?)",
-        (user_id, title, content)
-    )
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO Notes (user_id, title, content) VALUES (?, ?, ?)",
+                (user_id, title or "", content or "")
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        print("db_add_note error:", e)
+        return False
 
 
 def get_user_notes(user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM Notes WHERE user_id=? ORDER BY created_at DESC",
-        (user_id,)
-    )
-    notes = cursor.fetchall()
-    conn.close()
-    return notes
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM Notes WHERE user_id=? ORDER BY created_at DESC",
+                (user_id,)
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        print("get_user_notes error:", e)
+        return []
 
 
 def get_note(nid):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM Notes WHERE id=?", (nid,))
-    note = cursor.fetchone()
-    conn.close()
-    return note
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM Notes WHERE id=?", (nid,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except Exception as e:
+        print("get_note error:", e)
+        return None
 
 
 def db_update_note(nid, new_title, new_content):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE Notes SET title=?, content=? WHERE id=?",
-        (new_title, new_content, nid)
-    )
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE Notes SET title=?, content=? WHERE id=?",
+                (new_title or "", new_content or "", nid)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        print("db_update_note error:", e)
+        return False
 
 
 def db_delete_note(nid):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM Notes WHERE id=?", (nid,))
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM Notes WHERE id=?", (nid,))
+            conn.commit()
+            return True
+    except Exception as e:
+        print("db_delete_note error:", e)
+        return False
 
 
 # ---------------- FILES ---------------- #
 
 def db_upload_file(user_id, filename, filepath):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO File_Upload (user_id, filename, filepath) VALUES (?, ?, ?)",
-        (user_id, filename, filepath)
-    )
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO File_Upload (user_id, filename, filepath) VALUES (?, ?, ?)",
+                (user_id, filename, filepath)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        print("db_upload_file error:", e)
+        return False
 
 
 def get_user_files(user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM File_Upload WHERE user_id=? ORDER BY uploaded_at DESC",
-        (user_id,)
-    )
-    files = cursor.fetchall()
-    conn.close()
-    return files
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM File_Upload WHERE user_id=? ORDER BY uploaded_at DESC",
+                (user_id,)
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        print("get_user_files error:", e)
+        return []
 
 
 def get_file(fid):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM File_Upload WHERE id=?", (fid,))
-    file = cursor.fetchone()
-    conn.close()
-
-    if file:
-        return os.path.abspath(file["filepath"])
-    return None
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM File_Upload WHERE id=?", (fid,))
+            row = cursor.fetchone()
+            if row:
+                return os.path.abspath(row["filepath"])
+            return None
+    except Exception as e:
+        print("get_file error:", e)
+        return None
 
 
 def db_delete_file(fid, user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "DELETE FROM File_Upload WHERE id=? AND user_id=?",
-        (fid, user_id)
-    )
-    conn.commit()
-    conn.close()
-    return True, "File deleted"
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM File_Upload WHERE id=? AND user_id=?",
+                (fid, user_id)
+            )
+            conn.commit()
+            return True, "File deleted"
+    except Exception as e:
+        print("db_delete_file error:", e)
+        return False, "Failed to delete file"
 
 def check_file_exists(user_id, filename):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "SELECT id FROM File_Upload WHERE user_id=? AND filename=?",
-        (user_id, filename)
-    )
-
-    file = cursor.fetchone()
-    conn.close()
-
-    return bool(file)
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM File_Upload WHERE user_id=? AND filename=?",
+                (user_id, filename)
+            )
+            row = cursor.fetchone()
+            return bool(row)
+    except Exception as e:
+        print("check_file_exists error:", e)
+        return False
 
 
 # ---------------- SEARCH ---------------- #
 
 def search_notes(query, user_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM Notes WHERE user_id=? AND title LIKE ?",
-        (user_id, f"%{query}%")
-    )
-    results = cursor.fetchall()
-    conn.close()
-    return results
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM Notes WHERE user_id=? AND title LIKE ?",
+                (user_id, f"%{query}%")
+            )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        print("search_notes error:", e)
+        return []
