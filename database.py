@@ -478,7 +478,7 @@ import os
 from contextlib import closing
 from werkzeug.security import generate_password_hash, check_password_hash
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "notes.db")
+DB_PATH = os.environ.get("DATABASE_PATH") or os.path.join(os.getenv("HOME", "/tmp"), "notes.db")
 
 
 def get_db_connection():
@@ -491,7 +491,9 @@ def get_db_connection():
 
 
 def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    # Ensure folder for DB exists and is writable (Render's /tmp or $HOME is writable)
+    db_dir = os.path.dirname(DB_PATH) or os.getenv("HOME", "/tmp")
+    os.makedirs(db_dir, exist_ok=True)
     with closing(get_db_connection()) as conn:
         cursor = conn.cursor()
 

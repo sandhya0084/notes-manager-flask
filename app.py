@@ -16,27 +16,43 @@ import openpyxl
 
 
 app = Flask(__name__)
-app.secret_key = 'Notes manager'
-app.config['UPLOAD_FOLDER'] = 'uploads'
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok = True)
+# Use environment-provided secret in production
+app.secret_key = os.environ.get('SECRET_KEY', 'Notes manager')
+# Use app-local uploads folder (absolute)
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 serializer = URLSafeTimedSerializer(app.secret_key)
-init_db()
+
+# Initialize DB inside app context (safe for Render/gunicorn)
+with app.app_context():
+    init_db()
 
 
-#EMAIL CONFIGURATION
-EMAIL_ADDRESS = "pythonexample704@gmail.com"
-EMAIL_PASSWORD = 'fftg prnw vwyo zhoe'
+# EMAIL CONFIGURATION (from env; optional)
+EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS')
+EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
+
+
 def send_email(to_mail, subject, body):
-    msg = EmailMessage()
-    msg['To'] = to_mail
-    msg['Subject'] = subject
-    msg['From'] = EMAIL_ADDRESS
-    msg.set_content(body)
-    
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        smtp.send_message(msg)
+    # Non-fatal: log and continue on failure
+    if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
+        print("Email not configured; skipping send")
+        return False
+    try:
+        msg = EmailMessage()
+        msg['To'] = to_mail
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_ADDRESS
+        msg.set_content(body)
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10) as smtp:
+            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+        return True
+    except Exception as e:
+        print('send_email error:', e)
+        return False
 
 @app.route('/')
 def home():    
