@@ -34,9 +34,9 @@ with app.app_context():
 EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 EMAIL_SMTP_HOST = os.environ.get('EMAIL_SMTP_HOST', 'smtp.gmail.com')
-EMAIL_SMTP_PORT = int(os.environ.get('EMAIL_SMTP_PORT', '465'))
-EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', '1') in ('1', 'true', 'True')
-EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '0') in ('1', 'true', 'True')
+EMAIL_SMTP_PORT = int(os.environ.get('EMAIL_SMTP_PORT', '587'))
+EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', '0') in ('1', 'true', 'True')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '1') in ('1', 'true', 'True')
 ENABLE_EMAIL_TEST = os.environ.get('ENABLE_EMAIL_TEST', '0') in ('1', 'true', 'True')
 SHOW_OTP_ON_FAILURE = os.environ.get('SHOW_OTP_ON_FAILURE', '0') in ('1', 'true', 'True')
 
