@@ -479,6 +479,7 @@ from contextlib import closing
 from werkzeug.security import generate_password_hash, check_password_hash
 
 DB_PATH = os.environ.get("DATABASE_PATH") or os.path.join(os.getenv("HOME", "/tmp"), "notes.db")
+OTP_EXPIRY_MINUTES = int(os.environ.get('OTP_EXPIRY_MINUTES', '15'))
 
 
 def get_db_connection():
@@ -509,14 +510,21 @@ def init_db():
         )
         """
         )
-        # Ensure is_active column exists (0 = not verified, 1 = verified)
+        # Ensure is_verified column exists (0 = not verified, 1 = verified)
         cursor.execute("PRAGMA table_info(User)")
         cols = [r[1] for r in cursor.fetchall()]
-        if 'is_active' not in cols:
+        if 'is_verified' not in cols:
             try:
-                cursor.execute("ALTER TABLE User ADD COLUMN is_active INTEGER DEFAULT 0")
+                cursor.execute("ALTER TABLE User ADD COLUMN is_verified INTEGER DEFAULT 0")
             except Exception:
-                # older SQLite versions may not support ALTER ADD with DEFAULT; ignore if fails
+                # ignore if ALTER fails on older SQLite
+                pass
+        # If older code used is_active, migrate values to is_verified
+        if 'is_active' in cols and 'is_verified' not in cols:
+            try:
+                cursor.execute("ALTER TABLE User ADD COLUMN is_verified INTEGER DEFAULT 0")
+                cursor.execute("UPDATE User SET is_verified = is_active WHERE is_active IS NOT NULL")
+            except Exception:
                 pass
 
         # OTP table (separate table to simplify expiry/rotation)
@@ -526,11 +534,20 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             otp TEXT NOT NULL,
+            email TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE
         )
         """
         )
+        # ensure email column exists in OTP for easier lookup/migration
+        cursor.execute("PRAGMA table_info(OTP)")
+        otp_cols = [r[1] for r in cursor.fetchall()]
+        if 'email' not in otp_cols:
+            try:
+                cursor.execute("ALTER TABLE OTP ADD COLUMN email TEXT")
+            except Exception:
+                pass
 
         # Notes table
         cursor.execute(
@@ -566,6 +583,8 @@ def init_db():
 # ---------------- USER ---------------- #
 
 def register_user(username, email, password):
+    # normalize email to avoid case-mismatch issues
+    email = (email or '').strip().lower()
     try:
         with closing(get_db_connection()) as conn:
             cursor = conn.cursor()
@@ -573,9 +592,9 @@ def register_user(username, email, password):
             # ensure is_active column exists before inserting active flag
             cursor.execute("PRAGMA table_info(User)")
             cols = [r[1] for r in cursor.fetchall()]
-            if 'is_active' in cols:
+            if 'is_verified' in cols:
                 cursor.execute(
-                    "INSERT INTO User (username, email, password, is_active) VALUES (?, ?, ?, 0)",
+                    "INSERT INTO User (username, email, password, is_verified) VALUES (?, ?, ?, 0)",
                     (username, email, hashed)
                 )
             else:
@@ -594,12 +613,25 @@ def register_user(username, email, password):
 
 def _get_user_id_by_email(email):
     try:
+        email = (email or '').strip().lower()
         with closing(get_db_connection()) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM User WHERE email=?", (email,))
             row = cursor.fetchone()
             return row["id"] if row else None
     except Exception:
+        return None
+
+
+def get_email_by_username(username):
+    try:
+        with closing(get_db_connection()) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT email FROM User WHERE username=? LIMIT 1", (username,))
+            row = cursor.fetchone()
+            return row['email'] if row else None
+    except Exception as e:
+        print('get_email_by_username error:', e)
         return None
 
 
@@ -613,7 +645,8 @@ def store_otp(email, otp):
             cursor = conn.cursor()
             # remove existing otps for user
             cursor.execute("DELETE FROM OTP WHERE user_id=?", (user_id,))
-            cursor.execute("INSERT INTO OTP (user_id, otp) VALUES (?, ?)", (user_id, otp))
+            # insert otp and store email as well (for convenience)
+            cursor.execute("INSERT INTO OTP (user_id, otp, email) VALUES (?, ?, ?)", (user_id, otp, email))
             conn.commit()
             return True
     except Exception as e:
@@ -637,16 +670,26 @@ def db_verify_otp(user_otp, email):
     try:
         with closing(get_db_connection()) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id FROM OTP WHERE user_id=? AND otp=?", (user_id, user_otp))
+            # Fetch latest OTP for the user
+            cursor.execute("SELECT id, otp, created_at FROM OTP WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,))
             row = cursor.fetchone()
-            if row:
-                # delete otp rows and activate user
+            if not row:
+                return False
+            latest_otp = row['otp']
+            created_at = row['created_at']
+            # check match and expiry
+            expiry = OTP_EXPIRY_MINUTES
+            # Use sqlite datetime comparison via query to test expiry
+            q = f"SELECT 1 FROM OTP WHERE id=? AND created_at >= datetime('now','-{expiry} minutes') LIMIT 1"
+            cursor.execute(q, (row['id'],))
+            ok_row = cursor.fetchone()
+            if ok_row and str(user_otp) == str(latest_otp):
+                # delete otp rows and mark user verified
                 cursor.execute("DELETE FROM OTP WHERE user_id=?", (user_id,))
-                # set user active
                 cursor.execute("PRAGMA table_info(User)")
                 cols = [r[1] for r in cursor.fetchall()]
-                if 'is_active' in cols:
-                    cursor.execute("UPDATE User SET is_active=1 WHERE id=?", (user_id,))
+                if 'is_verified' in cols:
+                    cursor.execute("UPDATE User SET is_verified=1 WHERE id=?", (user_id,))
                 conn.commit()
                 return True
             return False
@@ -666,11 +709,20 @@ def login_user(username_or_email, password):
             user = cursor.fetchone()
             if user and check_password_hash(user["password"], password):
                 # require account verification
+                # check `is_verified` column (normalized)
                 try:
-                    is_active = user.get('is_active') if isinstance(user, dict) else user['is_active']
+                    is_verified = None
+                    if isinstance(user, dict):
+                        is_verified = user.get('is_verified')
+                    else:
+                        # sqlite3.Row supports mapping access
+                        try:
+                            is_verified = user['is_verified']
+                        except Exception:
+                            is_verified = None
                 except Exception:
-                    is_active = None
-                if is_active in (0, '0', None):
+                    is_verified = None
+                if is_verified in (0, '0', None):
                     return False, "Account not verified. Please check your email.", None
                 return True, "Login successful", user["id"]
             return False, "Invalid credentials", None

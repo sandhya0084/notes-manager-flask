@@ -4,7 +4,7 @@ from database import (init_db, register_user,store_otp,
                       db_verify_otp,check_user_exists, login_user, db_reset_password,
                       db_add_note, get_user_notes, get_note,
                       db_update_note, db_delete_note, check_file_exists, db_upload_file, get_user_files, get_file, 
-                      db_delete_file, search_notes)
+                      db_delete_file, search_notes, get_db_connection)
 import re
 import random
 import smtplib
@@ -13,6 +13,7 @@ from itsdangerous import URLSafeTimedSerializer
 import os
 import io
 import openpyxl
+import traceback
 
 
 app = Flask(__name__)
@@ -70,7 +71,21 @@ def send_email(to_mail, subject, body):
                 smtp.send_message(msg)
         return True
     except Exception as e:
-        print('send_email error:', e)
+        # Detailed logging to help debugging on Render: include SMTP config and traceback
+        try:
+            print('send_email error:', e)
+            print('send_email config:', {
+                'EMAIL_SMTP_HOST': EMAIL_SMTP_HOST,
+                'EMAIL_SMTP_PORT': EMAIL_SMTP_PORT,
+                'EMAIL_USE_SSL': EMAIL_USE_SSL,
+                'EMAIL_USE_TLS': EMAIL_USE_TLS,
+                'FROM': EMAIL_ADDRESS,
+                'TO': to_mail,
+            })
+            print(traceback.format_exc())
+        except Exception:
+            # never raise from logging
+            pass
         return False
 
 
@@ -94,59 +109,148 @@ def email_test():
         return jsonify({'ok': True, 'to': to})
     return jsonify({'ok': False, 'error': 'send failed'})
 
+
+@app.route('/email_diagnostics')
+def email_diagnostics():
+    """Return masked email/SMPP config and recent OTP rows for debugging.
+
+    Enabled only when `ENABLE_EMAIL_TEST` is truthy to avoid exposing secrets in production.
+    """
+    if not ENABLE_EMAIL_TEST:
+        return jsonify({'ok': False, 'error': 'disabled'}), 403
+
+    def mask(s):
+        if not s:
+            return None
+        try:
+            parts = s.split('@')
+            if len(parts) == 2:
+                return parts[0][:2] + '***@' + parts[1]
+        except Exception:
+            pass
+        return s[:2] + '***'
+
+    # get recent OTPs
+    otp_rows = []
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT id, user_id, otp, created_at FROM OTP ORDER BY id DESC LIMIT 10')
+        for r in cur.fetchall():
+            otp_rows.append({'id': r['id'], 'user_id': r['user_id'], 'otp': r['otp'], 'created_at': r['created_at']})
+        conn.close()
+    except Exception as e:
+        print('email_diagnostics db error:', e)
+
+    return jsonify({
+        'ok': True,
+        'email_from': mask(EMAIL_ADDRESS),
+        'smtp_host': EMAIL_SMTP_HOST,
+        'smtp_port': EMAIL_SMTP_PORT,
+        'use_ssl': EMAIL_USE_SSL,
+        'use_tls': EMAIL_USE_TLS,
+        'recent_otps': otp_rows,
+    })
+
+
+@app.route('/resend_otp', methods=['GET', 'POST'])
+def resend_otp():
+    """Generate and resend an OTP to the given email.
+
+    Accepts `email` as query param or form field. Stores OTP in DB and
+    attempts to send it. On send failure, optionally stash `pending_otp`
+    in session for display when `SHOW_OTP_ON_FAILURE` is enabled.
+    """
+    # accept from query string or POST body
+    email = (request.values.get('email') or '').strip().lower()
+    if not email:
+        flash('Email is required to resend OTP', 'error')
+        return redirect(url_for('register'))
+
+    # ensure account exists
+    if not check_user_exists(email):
+        flash('Email not registered', 'error')
+        return redirect(url_for('register'))
+
+    # create and store OTP
+    otp = str(random.randint(100000, 999999))
+    try:
+        store_otp(email, otp)
+    except Exception as e:
+        print('resend_otp store_otp error:', e)
+
+    # attempt send
+    sent = send_email(email, 'OTP Verification', f'Your OTP is: {otp}')
+    if not sent:
+        # if configured for debugging, expose OTP in session for next render
+        if SHOW_OTP_ON_FAILURE:
+            session['pending_otp'] = otp
+            flash('Failed to send OTP email; OTP displayed for debugging.', 'error')
+        else:
+            flash('Failed to send OTP email. Please contact admin.', 'error')
+    else:
+        flash('OTP resent to your email', 'success')
+
+    return redirect(url_for('verify_otp', email=email))
+
 @app.route('/')
 def home():    
     return render_template('home.html')
 
 @app.route('/register', methods = ['GET', 'POST'])
 def register():    
-    if request.method == "POST": 
-        
-        message = ''
-        message_type = ''       
-        username = request.form.get('username', '').strip()
-        mail = request.form.get('email', '').lower()
-        password = request.form.get('password','')    
-        if not username or not mail or not password:
-            message = "Enter all the details"
-            message_type = 'error'
-            
-        elif not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', mail):
-            message = "Enter a valid email id"
-            message_type = 'error'
-                                  
-        elif len(password) < 6:
-            message = "Enter atleast 6 characters password"
-            message_type = "error" 
-            
-        elif check_user_exists(mail):
-            message = "Email already exists!!"
-            message_type = 'error'
-            
+    message = ''
+    message_type = ''
+
+    if request.method == "POST":
+        username = request.form.get('username')
+        email = (request.form.get('email') or '').strip().lower()
+        password = request.form.get('password')
+
+        if not username or not email or not password:
+            message = "All fields required"
+            message_type = "error"
+
+        elif check_user_exists(email):
+            message = "Email already exists"
+            message_type = "error"
+
         else:
-            success, message = register_user(username, mail, password)
-            message_type = "success"
-            
+            success, message = register_user(username, email, password)
+
             if success:
+                # ✅ Generate OTP
                 otp = str(random.randint(100000, 999999))
-                store_otp(mail, otp)
-                subject = "OTP for Notes manager"
-                body = f"Your OTP for Notes manager is {otp}"
-                sent = send_email(mail, subject, body)
+
+                # ✅ Store OTP
+                store_otp(email, otp)
+
+                # ✅ Send email and handle failure paths
+                sent = False
+                try:
+                    sent = send_email(
+                        email,
+                        "OTP Verification",
+                        f"Your OTP is: {otp}"
+                    )
+                except Exception as e:
+                    print("EMAIL ERROR:", e)
+
+                # If sending failed and debugging is enabled, expose OTP in session
                 if not sent:
-                    flash('Failed to send OTP email. If you do not receive email, contact admin.', 'error')
-                    # optional dev fallback: show OTP on verify page when SMTP not available
                     if SHOW_OTP_ON_FAILURE:
                         session['pending_otp'] = otp
+                        flash('Failed to send OTP email; OTP displayed for debugging.', 'error')
+                    else:
+                        flash('Failed to send OTP email. Please contact admin.', 'error')
                 else:
                     flash('OTP sent to your email', 'success')
 
-                return redirect(url_for('verify_otp', email = mail))
-                    
-                                    
-        return render_template('register.html', message = message, message_type = message_type)
-                
-    return render_template('register.html')
+                return redirect(url_for('verify_otp', email=email))
+
+            message_type = "error"
+
+    return render_template('register.html', message=message, message_type=message_type)
 
 @app.route('/verify_otp/<email>', methods = ['POST', 'GET'])
 def verify_otp(email):
@@ -157,12 +261,17 @@ def verify_otp(email):
     otp_to_show = None
     if session.get('pending_otp'):
         otp_to_show = session.get('pending_otp')
+    # show a resend link
+    resend_url = url_for('resend_otp') + f"?email={email}"
     if request.method == 'POST':
         otp = request.form.get('otp')
         
-        if db_verify_otp(otp,email):
+        # normalize email for lookup
+        norm_email = (email or '').strip().lower()
+        if db_verify_otp(otp, norm_email):
             message = "OTP verified successfully"
             message_type = 'success'
+            flash('OTP verified successfully. You may now login.', 'success')
             return redirect(url_for('login'))
         
         else:
@@ -170,7 +279,7 @@ def verify_otp(email):
             message_type = 'error'
             
     # clear displayed otp after rendering once
-    resp = render_template('verify_otp.html', email=email, message=message, message_type=message_type, otp_to_show=otp_to_show)
+    resp = render_template('verify_otp.html', email=email, message=message, message_type=message_type, otp_to_show=otp_to_show, resend_url=resend_url)
     if 'pending_otp' in session:
         session.pop('pending_otp', None)
     return resp
@@ -189,13 +298,31 @@ def login():
             message_type = 'error'
             
         else:
+            # normalize email if user provided email
+            orig_username = username
+            if '@' in (username or ''):
+                username = username.strip().lower()
             success, message, user_id = login_user(username, password)
             message_type  = "success" if success else 'error'
-            if success:                
+            if success:
                 session['username'] = username
                 session['user_id'] = user_id
-                
                 return redirect(url_for('dashboard'))
+            # if account not verified, redirect to verify page (prefill email)
+            if message and 'not verified' in message.lower():
+                # determine email to use for verification
+                if '@' in (orig_username or ''):
+                    email_for_verify = orig_username.strip().lower()
+                else:
+                    # try to look up email by username
+                    try:
+                        from database import get_email_by_username
+                        email_for_verify = get_email_by_username(orig_username)
+                    except Exception:
+                        email_for_verify = None
+                if email_for_verify:
+                    flash('Account not verified. Please enter the OTP sent to your email or resend.', 'error')
+                    return redirect(url_for('verify_otp', email=email_for_verify))
             
     return render_template('login.html', message = message, message_type = message_type)
 
@@ -203,18 +330,23 @@ def login():
 @app.route('/forgot_password', methods = ['POST', 'GET'])
 def forgot_password():
     if request.method == 'POST':
-        email = request.form.get('email')        
+        email = (request.form.get('email') or '').strip().lower()
         if not email:
             flash('Email is required','error')
-            
+
         elif not check_user_exists(email):
             flash('Email not registered', 'error')
-            
+
         else:
             token = serializer.dumps(email, salt = 'reset-password')
             reset_url = url_for('reset_password', token = token, _external = True)
             body = f"Click this link to reset your password: {reset_url}"
-            sent = send_email(email, "Reset Link", body)
+            try:
+                sent = send_email(email, "Reset Link", body)
+            except Exception as e:
+                print('forgot_password send_email error:', e)
+                sent = False
+
             if sent:
                 flash("Reset link has been sent to registered email", 'success')
             else:
@@ -225,21 +357,25 @@ def forgot_password():
  
 @app.route('/reset_password/<token>', methods = ['GET', 'POST'])
 def reset_password(token) :
-    email = serializer.loads(token, salt = 'reset-password', max_age= 600)
-    
+    try:
+        email = serializer.loads(token, salt = 'reset-password', max_age=600)
+    except Exception as e:
+        print('reset_password token error:', e)
+        flash('Reset link is invalid or has expired', 'error')
+        return redirect(url_for('forgot_password'))
+
     if request.method == 'POST':
         password = request.form.get('password')
         db_reset_password(email, password)
         flash('Password has been reset')
         return redirect(url_for('login'))
-    
+
     return render_template('reset_password.html', token = token)
 
-@app.route('/dashborad')
+@app.route('/dashboard')
 def dashboard():
     if 'user_id' in session:
         return render_template('dashboard.html')
-    
     return redirect(url_for('login'))
 
     
