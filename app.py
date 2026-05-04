@@ -37,8 +37,10 @@ EMAIL_SMTP_HOST = os.environ.get('EMAIL_SMTP_HOST', 'smtp.gmail.com')
 EMAIL_SMTP_PORT = int(os.environ.get('EMAIL_SMTP_PORT', '587'))
 EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', '0') in ('1', 'true', 'True')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '1') in ('1', 'true', 'True')
-ENABLE_EMAIL_TEST = os.environ.get('ENABLE_EMAIL_TEST', '0') in ('1', 'true', 'True')
-SHOW_OTP_ON_FAILURE = os.environ.get('SHOW_OTP_ON_FAILURE', '0') in ('1', 'true', 'True')
+ENABLE_EMAIL_TEST = os.environ.get('ENABLE_EMAIL_TEST', '1') in ('1', 'true', 'True')
+SHOW_OTP_ON_FAILURE = os.environ.get('SHOW_OTP_ON_FAILURE', '1') in ('1', 'true', 'True')
+
+
 
 
 def send_email(to_mail, subject, body):
@@ -182,7 +184,7 @@ def resend_otp():
     # attempt send
     sent = send_email(email, 'OTP Verification', f'Your OTP is: {otp}')
     if not sent:
-        # if configured for debugging, expose OTP in session for next render
+        # if configured for debugging, expose OTP in session for display when SHOW_OTP_ON_FAILURE is enabled
         if SHOW_OTP_ON_FAILURE:
             session['pending_otp'] = otp
             flash('Failed to send OTP email; OTP displayed for debugging.', 'error')
@@ -321,7 +323,28 @@ def login():
                     except Exception:
                         email_for_verify = None
                 if email_for_verify:
-                    flash('Account not verified. Please enter the OTP sent to your email or resend.', 'error')
+                    # auto-generate and send OTP when user tries to login but account not verified
+                    otp = str(random.randint(100000, 999999))
+                    try:
+                        store_otp(email_for_verify, otp)
+                    except Exception as e:
+                        print('login store_otp error:', e)
+
+                    sent = False
+                    try:
+                        sent = send_email(email_for_verify, 'OTP Verification', f'Your OTP is: {otp}')
+                    except Exception as e:
+                        print('login send_email error:', e)
+
+                    if not sent:
+                        if SHOW_OTP_ON_FAILURE:
+                            session['pending_otp'] = otp
+                            flash('Failed to send OTP email; OTP displayed for debugging.', 'error')
+                        else:
+                            flash('Failed to send OTP email. Please contact admin.', 'error')
+                    else:
+                        flash('OTP sent to your email', 'success')
+
                     return redirect(url_for('verify_otp', email=email_for_verify))
             
     return render_template('login.html', message = message, message_type = message_type)
